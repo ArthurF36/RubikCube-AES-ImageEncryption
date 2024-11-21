@@ -62,3 +62,215 @@ def matrix2text(matrix):
             text |= (matrix[i][j] << (120 - 8 * (4 * i + j)))
     return text
 
+class AES:
+    def __init__(self, master_key):
+        self.change_key(master_key)
+
+    def change_key(self, master_key):
+        self.round_keys = text2matrix(master_key)
+        # print (len(self.round_keys))
+
+        for i in range(4, 4 * 11):
+            self.round_keys.append([])
+            if i % 4 == 0:
+                byte = self.round_keys[i - 4][0] ^ Sbox[self.round_keys[i - 1][1]] ^ Rcon[i // 4]
+                self.round_keys[i].append(byte)
+
+                for j in range(1, 4):
+                    byte = self.round_keys[i - 4][j] ^ Sbox[self.round_keys[i - 1][(j + 1) % 4]]
+                    self.round_keys[i].append(byte)
+            else:
+                for j in range(4):
+                    byte = self.round_keys[i - 4][j] ^ self.round_keys[i - 1][j]
+                    self.round_keys[i].append(byte)
+
+        # print (len(self.round_keys))
+
+    def encrypt(self, plaintext):
+        self.plain_state = text2matrix(plaintext)
+
+        self.__add_round_key(self.plain_state, self.round_keys[:4])
+
+        for i in range(1, 10):
+            self.__round_encrypt(self.plain_state, self.round_keys[4 * i : 4 * (i + 1)])
+
+        self.__sub_bytes(self.plain_state)
+        self.__shift_rows(self.plain_state)
+        self.__add_round_key(self.plain_state, self.round_keys[40:])
+
+        return matrix2text(self.plain_state)
+
+    def decrypt(self, ciphertext):
+        self.cipher_state = text2matrix(ciphertext)
+
+        self.__add_round_key(self.cipher_state, self.round_keys[40:])
+        self.__inv_shift_rows(self.cipher_state)
+        self.__inv_sub_bytes(self.cipher_state)
+
+        for i in range(9, 0, -1):
+            self.__round_decrypt(self.cipher_state, self.round_keys[4 * i : 4 * (i + 1)])
+
+        self.__add_round_key(self.cipher_state, self.round_keys[:4])
+
+        return matrix2text(self.cipher_state)
+
+    def __add_round_key(self, s, k):
+        for i in range(4):
+            for j in range(4):
+                s[i][j] ^= k[i][j]
+
+
+    def __round_encrypt(self, state_matrix, key_matrix):
+        self.__sub_bytes(state_matrix)
+        self.__shift_rows(state_matrix)
+        self.__mix_columns(state_matrix)
+        self.__add_round_key(state_matrix, key_matrix)
+
+
+    def __round_decrypt(self, state_matrix, key_matrix):
+        self.__add_round_key(state_matrix, key_matrix)
+        self.__inv_mix_columns(state_matrix)
+        self.__inv_shift_rows(state_matrix)
+        self.__inv_sub_bytes(state_matrix)
+
+    def __sub_bytes(self, s):
+        for i in range(4):
+            for j in range(4):
+                s[i][j] = Sbox[s[i][j]]
+
+
+    def __inv_sub_bytes(self, s):
+        for i in range(4):
+            for j in range(4):
+                s[i][j] = InvSbox[s[i][j]]
+
+
+    def __shift_rows(self, s):
+        s[0][1], s[1][1], s[2][1], s[3][1] = s[1][1], s[2][1], s[3][1], s[0][1]
+        s[0][2], s[1][2], s[2][2], s[3][2] = s[2][2], s[3][2], s[0][2], s[1][2]
+        s[0][3], s[1][3], s[2][3], s[3][3] = s[3][3], s[0][3], s[1][3], s[2][3]
+
+
+    def __inv_shift_rows(self, s):
+        s[0][1], s[1][1], s[2][1], s[3][1] = s[3][1], s[0][1], s[1][1], s[2][1]
+        s[0][2], s[1][2], s[2][2], s[3][2] = s[2][2], s[3][2], s[0][2], s[1][2]
+        s[0][3], s[1][3], s[2][3], s[3][3] = s[1][3], s[2][3], s[3][3], s[0][3]
+
+    def __mix_single_column(self, a):
+        # please see Sec 4.1.2 in The Design of Rijndael
+        t = a[0] ^ a[1] ^ a[2] ^ a[3]
+        u = a[0]
+        a[0] ^= t ^ xtime(a[0] ^ a[1])
+        a[1] ^= t ^ xtime(a[1] ^ a[2])
+        a[2] ^= t ^ xtime(a[2] ^ a[3])
+        a[3] ^= t ^ xtime(a[3] ^ u)
+
+
+    def __mix_columns(self, s):
+        for i in range(4):
+            self.__mix_single_column(s[i])
+
+
+    def __inv_mix_columns(self, s):
+        # see Sec 4.1.3 in The Design of Rijndael
+        for i in range(4):
+            u = xtime(xtime(s[i][0] ^ s[i][2]))
+            v = xtime(xtime(s[i][1] ^ s[i][3]))
+            s[i][0] ^= u
+            s[i][1] ^= v
+            s[i][2] ^= u
+            s[i][3] ^= v
+
+        self.__mix_columns(s)
+
+def encrypt_list(K, aes : AES):
+    encrypted_list = []
+    length = len(K)
+    start_point = list(range(0, length, 4))
+    start_point.append(length)
+
+    for i in range(len(start_point)-1):  
+      plaintext = ""      
+      for j in range(start_point[i], start_point[i+1]):
+        plaintext = plaintext + str(K[j]) + " "
+      plaintext = plaintext.strip()
+      plaintext = int.from_bytes(plaintext.encode(encoding='UTF-8'), 'big')
+      ciphertext = aes.encrypt(plaintext)
+      encrypted_list.append(ciphertext)
+    
+    return encrypted_list
+
+def decrypt_list(encrypted_K, aes : AES):
+  decrypted_list = []
+  for cptext in encrypted_K:
+    text = aes.decrypt(cptext)
+    text = int(text).to_bytes(64, 'big').decode(encoding='UTF-8')
+    text = str(text).split('\x00')[-1].split()
+    for i in text:
+      decrypted_list.append(int(i))
+
+  return decrypted_list
+
+def encrypt(dict_key, aes : AES):
+  encrypted_dict_key = {}
+  Kr = dict_key["Kr"]
+  Kc = dict_key["Kc"]
+  ITER_MAX = dict_key["ITER"]
+
+  encrypted_Kr = encrypt_list(Kr, aes)
+  encrypted_Kc = encrypt_list(Kc, aes)
+  ITER_MAX_plaintext = int.from_bytes(str(ITER_MAX).encode(encoding='UTF-8'), 'big')
+  encrypted_iter = aes.encrypt(ITER_MAX_plaintext)
+
+  encrypted_dict_key["Kr"] = encrypted_Kr
+  encrypted_dict_key["Kc"] = encrypted_Kc
+  encrypted_dict_key["ITER"] = encrypted_iter
+
+  return encrypted_dict_key
+
+def decrypt(encrypted_dict_key, aes : AES):
+  decrypted_dict_key = {}
+  Kr = encrypted_dict_key["Kr"]
+  Kc = encrypted_dict_key["Kc"]
+  iter = encrypted_dict_key["ITER"]
+  
+  decrypted_Kr = decrypt_list(Kr, aes)
+  decrypted_Kc = decrypt_list(Kc, aes)
+  decrypted_iter = aes.decrypt(iter)
+  decrypted_iter = str(decrypted_iter.to_bytes(16, "big").decode(encoding='UTF-8'))
+  decrypted_iter = decrypted_iter.split('\x00')[-1]
+
+  decrypted_dict_key["Kr"] = decrypted_Kr
+  decrypted_dict_key["Kc"] = decrypted_Kc
+  decrypted_dict_key["ITER"] = int(decrypted_iter)
+
+  return decrypted_dict_key
+
+import cv2
+import random 
+
+image = cv2.imread("/content/drive/MyDrive/LTMM/iris-flower-5995009_1280.jpg")
+def create_key(image, ITER_MAX=2, alpha=8, aes=None):
+  # Create vector Kr and Kc
+  Kr = [random.randint(0, 2 ** alpha - 1) for i in range(image.shape[0])]
+  Kc = [random.randint(0, 2 ** alpha - 1) for i in range(image.shape[1])]
+
+  dict_key = {"Kr": Kr,
+              "Kc": Kc,
+              "ITER": ITER_MAX
+            }
+  if aes is not None:
+    dict_key = encrypt(dict_key, aes)
+  return dict_key
+
+import numpy as np
+master_key = 0x2b7e151628aed2a6abf7158809cf4f3c
+aes = AES(master_key)
+
+dict_key = create_key(image)
+print(dict_key)
+
+dict1 = encrypt(dict_key, aes)
+print(dict1)
+dict2 = decrypt(dict1, aes)
+print(dict2)
